@@ -54,10 +54,19 @@ const agentConfig: Record<string, { label: string; icon: string; color: string; 
   },
 };
 
+const agentSteps = [
+  { key: "research", label: "Research", icon: "🔍" },
+  { key: "planner", label: "Plan", icon: "📋" },
+  { key: "executor", label: "Execute", icon: "⚙️" },
+  { key: "validator", label: "Validate", icon: "✅" },
+];
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [activeAgent, setActiveAgent] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   const runPipeline = () => {
@@ -65,6 +74,8 @@ export default function Home() {
 
     setMessages([]);
     setIsRunning(true);
+    setIsDone(false);
+    setActiveAgent("research");
 
     const ws = new WebSocket("ws://127.0.0.1:8000/ws");
     wsRef.current = ws;
@@ -75,21 +86,47 @@ export default function Home() {
 
     ws.onmessage = (event) => {
       const data: AgentMessage = JSON.parse(event.data);
+
+      // Update active agent indicator
+      if (data.status === "done" && data.agent !== "complete" && data.agent !== "error") {
+        const keys = agentSteps.map((s) => s.key);
+        const nextIndex = keys.indexOf(data.agent) + 1;
+        if (nextIndex < keys.length) {
+          setActiveAgent(keys[nextIndex]);
+        }
+      }
+
       setMessages((prev) => {
-        // Replace starting message with real result for same agent
         const filtered = prev.filter(
           (m) => !(m.agent === data.agent && m.status === "starting")
         );
         return [...filtered, data];
       });
+
       if (data.agent === "complete" || data.agent === "error") {
         setIsRunning(false);
+        setActiveAgent(null);
+        setIsDone(true);
         ws.close();
       }
     };
 
-    ws.onerror = () => setIsRunning(false);
+    ws.onerror = () => {
+      setIsRunning(false);
+      setActiveAgent(null);
+    };
   };
+
+  const resetPipeline = () => {
+    setMessages([]);
+    setInput("");
+    setIsDone(false);
+    setActiveAgent(null);
+  };
+
+  const completedAgents = messages
+    .filter((m) => m.status === "done" && m.agent !== "complete")
+    .map((m) => m.agent);
 
   return (
     <main className="min-h-screen bg-[#0a0a0f] text-white">
@@ -113,16 +150,34 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Agent flow indicators */}
+        {/* Agent flow indicators - live highlighting */}
         <div className="flex items-center justify-center gap-2 mb-8 text-sm">
-          {["🔍 Research", "📋 Plan", "⚙️ Execute", "✅ Validate"].map((label, i, arr) => (
-            <div key={label} className="flex items-center gap-2">
-              <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-gray-400">
-                {label}
-              </span>
-              {i < arr.length - 1 && <span className="text-gray-600">→</span>}
-            </div>
-          ))}
+          {agentSteps.map((step, i) => {
+            const isActive = activeAgent === step.key;
+            const isCompleted = completedAgents.includes(step.key);
+            return (
+              <div key={step.key} className="flex items-center gap-2">
+                <span className={`px-3 py-1 rounded-full border transition-all duration-300 ${
+                  isActive
+                    ? "bg-blue-500/20 border-blue-400 text-blue-300 shadow-lg shadow-blue-500/20"
+                    : isCompleted
+                    ? "bg-white/10 border-white/20 text-white"
+                    : "bg-white/5 border-white/10 text-gray-500"
+                }`}>
+                  {isActive && (
+                    <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse mr-1" />
+                  )}
+                  {isCompleted && <span className="mr-1">✓</span>}
+                  {step.icon} {step.label}
+                </span>
+                {i < agentSteps.length - 1 && (
+                  <span className={`transition-colors duration-300 ${isCompleted ? "text-white/40" : "text-gray-700"}`}>
+                    →
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Input */}
@@ -133,22 +188,31 @@ export default function Home() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && runPipeline()}
             placeholder="e.g. I have sales data and want to detect anomalies..."
-            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/70 focus:bg-white/8 transition-all"
+            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/70 transition-all"
           />
-          <button
-            onClick={runPipeline}
-            disabled={isRunning}
-            className="bg-blue-600 hover:bg-blue-500 disabled:bg-white/10 disabled:text-gray-500 disabled:cursor-not-allowed px-7 py-4 rounded-xl font-semibold transition-all text-sm whitespace-nowrap"
-          >
-            {isRunning ? (
-              <span className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                Running...
-              </span>
-            ) : (
-              "Run Pipeline →"
-            )}
-          </button>
+          {isDone ? (
+            <button
+              onClick={resetPipeline}
+              className="bg-white/10 hover:bg-white/20 px-7 py-4 rounded-xl font-semibold transition-all text-sm whitespace-nowrap border border-white/10"
+            >
+              New Pipeline
+            </button>
+          ) : (
+            <button
+              onClick={runPipeline}
+              disabled={isRunning}
+              className="bg-blue-600 hover:bg-blue-500 disabled:bg-white/10 disabled:text-gray-500 disabled:cursor-not-allowed px-7 py-4 rounded-xl font-semibold transition-all text-sm whitespace-nowrap"
+            >
+              {isRunning ? (
+                <span className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  Running...
+                </span>
+              ) : (
+                "Run Pipeline →"
+              )}
+            </button>
+          )}
         </div>
 
         {/* Messages */}
@@ -163,7 +227,6 @@ export default function Home() {
                 key={i}
                 className={`rounded-xl border p-5 ${config.color} ${config.border} transition-all`}
               >
-                {/* Agent header */}
                 <div className="flex items-center gap-3 mb-3">
                   <span className="text-xl">{config.icon}</span>
                   <span className={`text-xs font-semibold px-2 py-1 rounded-full ${config.badge}`}>
@@ -177,19 +240,20 @@ export default function Home() {
                   )}
                 </div>
 
-                {/* Content */}
                 {isStarting ? (
                   <p className="text-gray-400 text-sm animate-pulse">{msg.message}</p>
                 ) : msg.agent === "complete" ? (
                   <p className="text-gray-300 text-sm">{msg.message}</p>
                 ) : (
                   <div className="prose prose-invert prose-sm max-w-none
-                    prose-headings:text-white prose-headings:font-semibold
-                    prose-p:text-gray-300 prose-p:leading-relaxed
+                    prose-headings:text-white prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
+                    prose-p:text-gray-300 prose-p:leading-relaxed prose-p:my-1
                     prose-strong:text-white
-                    prose-li:text-gray-300
+                    prose-ul:text-gray-300 prose-ul:my-2 prose-ul:pl-4
+                    prose-ol:text-gray-300 prose-ol:my-2 prose-ol:pl-4
+                    prose-li:text-gray-300 prose-li:my-0.5 prose-li:marker:text-gray-500
                     prose-code:text-emerald-300 prose-code:bg-black/40 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs
-                    prose-pre:bg-black/60 prose-pre:border prose-pre:border-white/10 prose-pre:rounded-lg
+                    prose-pre:bg-black/60 prose-pre:border prose-pre:border-white/10 prose-pre:rounded-lg prose-pre:my-3
                   ">
                     <ReactMarkdown>{msg.message}</ReactMarkdown>
                   </div>
@@ -198,7 +262,6 @@ export default function Home() {
             );
           })}
 
-          {/* Empty state */}
           {messages.length === 0 && !isRunning && (
             <div className="text-center py-20 text-gray-600">
               <div className="text-5xl mb-4">🤖</div>

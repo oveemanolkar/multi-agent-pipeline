@@ -5,13 +5,7 @@ import os
 load_dotenv()
 
 def get_connection():
-    return psycopg2.connect(
-        host="db",
-        port=5432,
-        dbname="multiagent",
-        user="user",
-        password="password"
-    )
+    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 def setup_database():
     conn = get_connection()

@@ -6,8 +6,8 @@ load_dotenv()
 
 def get_connection():
     return psycopg2.connect(
-        host="127.0.0.1",
-        port=5433,
+        host="db",
+        port=5432,
         dbname="multiagent",
         user="user",
         password="password"
